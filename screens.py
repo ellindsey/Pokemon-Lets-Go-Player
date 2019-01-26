@@ -4,9 +4,15 @@ import time
 import numpy as np
 import argparse
 import glob
+import pytesseract
+import os
+from PIL import Image
 
 import buttons
 import servo
+
+text_in_box = ''
+cursorFound = False
 
 def auto_canny(image, sigma=0.33):
     # compute the median of the single channel pixel intensities
@@ -36,6 +42,9 @@ def findContoursFilling(contours,x,y,w,h,size = 0.5):
     return results
 
 def DetectTextBox(frame):
+    global text_in_box
+    global cursorFound
+    
     fh, fw, fc = frame.shape
     gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     edges = auto_canny(gray_image,sigma = 0.5)
@@ -60,8 +69,6 @@ def DetectTextBox(frame):
         y = int(fh * 0.88)
         w = int(fw * 0.043)
         h = int(fh * 0.088)
-
-        cursorFound = False
         
         result = findContoursFilling(contours,x,y,w,h,size = 0.3)
 
@@ -72,14 +79,56 @@ def DetectTextBox(frame):
             cv2.drawContours(frame, result, 0, (255,0,255), 1)
 
             cursorFound = True
-        
-        #todo: text recognition
 
+            if text_in_box == '':
+
+                x = int(fw * 0.205)
+                y = int(fh * 0.803)
+                w = int(fw * 0.560)
+                h = int(fh * 0.162)
+                
+                cv2.rectangle(frame,(x,y),(x+w,y+h),(0,0,0),1)
+
+                #clip out the region with text
+
+                textbox = gray_image[y:y+h,x:x+w]
+
+                #scale it by 200%
+
+                kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+                textbox = cv2.filter2D(textbox, -1, kernel)
+
+                textbox = cv2.resize(textbox, (w * 2, h * 2), interpolation = cv2.INTER_LINEAR)
+
+                #sharpen it
+                
+                th, textbox = cv2.threshold(textbox, 125, 255, cv2.THRESH_BINARY)
+
+                #saving it to a file, mostly so I can check the intermediate stage
+
+                filename = "temp.png"
+                cv2.imwrite(filename, textbox)
+
+                #Text recognition
+
+                time_started = time.time()
+
+                text_in_box = pytesseract.image_to_string(Image.open(filename))
+
+                duration = time.time() - time_started
+                
+                print(text_in_box),"(%4.2fs)" % duration
         
-        
-        return True,frame,[cursorFound]
+        else:
+            if cursorFound:
+                text_in_box = ''
+                
+            cursorFound = False
+            
+        return True,frame,[cursorFound,text_in_box]
     else:
-        return False,frame,[False]
+        text_in_box = ''
+        return False,frame,[False,'']
                 
 def DetectMenu(frame):
     fh, fw, fc = frame.shape
